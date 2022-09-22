@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+import hashlib
+
 from threading import current_thread
 
 from PIL import Image
@@ -8,7 +10,6 @@ from six.moves import queue
 from six.moves.urllib.parse import urlparse
 
 from icrawler.utils import ThreadPool
-
 
 class Downloader(ThreadPool):
     """Base class for downloader.
@@ -58,7 +59,12 @@ class Downloader(ThreadPool):
         else:
             raise ValueError('"file_idx_offset" must be an integer or `auto`')
 
-    def get_filename(self, task, default_ext):
+    def get_hash(self, f):
+        md5 = hashlib.md5()
+        md5.update(f.read())
+        return md5.hexdigest()
+
+    def get_filename(self, task, response, default_ext):
         """Set the path where the image will be saved.
 
         The default strategy is to use an increasing 6-digit number as
@@ -75,7 +81,9 @@ class Downloader(ThreadPool):
         url_path = urlparse(task['file_url'])[2]
         extension = url_path.split('.')[-1] if '.' in url_path else default_ext
         file_idx = self.fetched_num + self.file_idx_offset
-        return '{:06d}.{}'.format(file_idx, extension)
+        file_hash = self.get_hash(BytesIO(response.content))
+        #return '{:06d}.{}'.format(file_idx, extension)
+        return '{}.{}'.format(file_hash, extension)
 
     def reach_max_num(self):
         """Check if downloaded images reached max num.
@@ -116,7 +124,8 @@ class Downloader(ThreadPool):
         if not overwrite:
             with self.lock:
                 self.fetched_num += 1
-                filename = self.get_filename(task, default_ext)
+                response = self.session.get(file_url, timeout=timeout)
+                filename = self.get_filename(task, response, default_ext)
                 if self.storage.exists(filename):
                     self.logger.info('skip downloading file %s', filename)
                     return
@@ -141,7 +150,7 @@ class Downloader(ThreadPool):
                     break
                 with self.lock:
                     self.fetched_num += 1
-                    filename = self.get_filename(task, default_ext)
+                    filename = self.get_filename(task, response, default_ext)
                 self.logger.info('image #%s\t%s', self.fetched_num, file_url)
                 self.storage.write(filename, response.content)
                 task['success'] = True
@@ -252,7 +261,7 @@ class ImageDownloader(Downloader):
             return False
         return True
 
-    def get_filename(self, task, default_ext):
+    def get_filename(self, task, response, default_ext):
         url_path = urlparse(task['file_url'])[2]
         if '.' in url_path:
             extension = url_path.split('.')[-1]
@@ -263,7 +272,9 @@ class ImageDownloader(Downloader):
         else:
             extension = default_ext
         file_idx = self.fetched_num + self.file_idx_offset
-        return '{:06d}.{}'.format(file_idx, extension)
+        file_hash = self.get_hash(BytesIO(response.content))
+        #return '{:06d}.{}'.format(file_idx, extension)
+        return '{}.{}'.format(file_hash, extension)
 
     def worker_exec(self,
                     max_num,
